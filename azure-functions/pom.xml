@@ -74,6 +74,7 @@
           <appName>${functionAppName}</appName>
           <resourceGroup>${functionResourceGroup}</resourceGroup>
           <region>${functionAppRegion}</region>
+          <pricingTier>Consumption</pricingTier>
           <runtime>
             <os>linux</os>
             <javaVersion>21</javaVersion>
@@ -82,6 +83,20 @@
             <property>
               <name>FUNCTIONS_EXTENSION_VERSION</name>
               <value>~4</value>
+            </property>
+            <!-- Se resuelven desde variables de entorno del shell que hace el
+                 deploy, nunca desde valores fijos en este archivo. -->
+            <property>
+              <name>ORACLE_JDBC_URL</name>
+              <value>${env.ORACLE_JDBC_URL}</value>
+            </property>
+            <property>
+              <name>ORACLE_DB_USER</name>
+              <value>${env.ORACLE_DB_USER}</value>
+            </property>
+            <property>
+              <name>ORACLE_DB_PASSWORD</name>
+              <value>${env.ORACLE_DB_PASSWORD}</value>
             </property>
           </appSettings>
         </configuration>

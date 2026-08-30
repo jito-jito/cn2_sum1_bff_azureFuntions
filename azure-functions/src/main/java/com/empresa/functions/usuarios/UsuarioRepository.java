@@ -23,6 +23,7 @@ public class UsuarioRepository {
 
     public UsuarioDto crear(CrearUsuarioRequest request) {
         String sql = "INSERT INTO USUARIOS (USERNAME, EMAIL, NOMBRE_COMPLETO) VALUES (?, ?, ?)";
+        long id;
         try (Connection conn = DataSourceProvider.get().getConnection();
                 // Oracle JDBC: pedir la columna por nombre es necesario para que
                 // getGeneratedKeys() devuelva el valor del IDENTITY y no un ROWID.
@@ -33,39 +34,47 @@ public class UsuarioRepository {
             ps.executeUpdate();
             try (ResultSet keys = ps.getGeneratedKeys()) {
                 keys.next();
-                return obtenerPorId(keys.getLong(1));
+                id = keys.getLong(1);
             }
         } catch (SQLException e) {
             throw translate(e);
         }
+        // Fuera del try-with-resources: obtenerPorId abre su propia conexión y
+        // no debe hacerlo mientras la de arriba sigue abierta (ver §note pool).
+        return obtenerPorId(id);
     }
 
     public List<UsuarioDto> listar() {
         String sql = "SELECT ID, USERNAME, EMAIL, NOMBRE_COMPLETO, ESTADO, FECHA_CREACION, FECHA_MODIF "
                 + "FROM USUARIOS ORDER BY ID";
+        List<UsuarioDto> usuarios = new ArrayList<>();
         try (Connection conn = DataSourceProvider.get().getConnection();
                 PreparedStatement ps = conn.prepareStatement(sql);
                 ResultSet rs = ps.executeQuery()) {
-            List<UsuarioDto> usuarios = new ArrayList<>();
             while (rs.next()) {
                 usuarios.add(map(rs, List.of()));
             }
-            if (usuarios.isEmpty()) {
-                return usuarios;
-            }
-            Map<Long, List<RolDto>> rolesPorUsuario = rolesDeUsuarios(
-                    usuarios.stream().map(UsuarioDto::id).collect(Collectors.toList()));
-            return usuarios.stream()
-                    .map(u -> reemplazarRoles(u, rolesPorUsuario.getOrDefault(u.id(), List.of())))
-                    .toList();
         } catch (SQLException e) {
             throw new RuntimeException("Error al listar usuarios", e);
         }
+        if (usuarios.isEmpty()) {
+            return usuarios;
+        }
+        // rolesDeUsuarios abre su propia conexión: se llama recién aquí, con la
+        // de arriba ya cerrada, para no necesitar 2 conexiones simultáneas por
+        // invocación (con la latencia hacia la ADB, la 2ª conexión concurrente
+        // podía superar el connectionTimeout de HikariCP).
+        Map<Long, List<RolDto>> rolesPorUsuario = rolesDeUsuarios(
+                usuarios.stream().map(UsuarioDto::id).collect(Collectors.toList()));
+        return usuarios.stream()
+                .map(u -> reemplazarRoles(u, rolesPorUsuario.getOrDefault(u.id(), List.of())))
+                .toList();
     }
 
     public UsuarioDto obtenerPorId(Long id) {
         String sql = "SELECT ID, USERNAME, EMAIL, NOMBRE_COMPLETO, ESTADO, FECHA_CREACION, FECHA_MODIF "
                 + "FROM USUARIOS WHERE ID = ?";
+        UsuarioDto usuario;
         try (Connection conn = DataSourceProvider.get().getConnection();
                 PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setLong(1, id);
@@ -73,11 +82,12 @@ public class UsuarioRepository {
                 if (!rs.next()) {
                     throw new NotFoundException("Usuario " + id + " no encontrado");
                 }
-                return map(rs, rolesDeUsuario(id));
+                usuario = map(rs, List.of());
             }
         } catch (SQLException e) {
             throw new RuntimeException("Error al obtener usuario " + id, e);
         }
+        return reemplazarRoles(usuario, rolesDeUsuario(id));
     }
 
     public UsuarioDto actualizar(Long id, ActualizarUsuarioRequest request) {
@@ -93,10 +103,10 @@ public class UsuarioRepository {
             if (updated == 0) {
                 throw new NotFoundException("Usuario " + id + " no encontrado");
             }
-            return obtenerPorId(id);
         } catch (SQLException e) {
             throw translate(e);
         }
+        return obtenerPorId(id);
     }
 
     public void eliminarLogico(Long id) {
