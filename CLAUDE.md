@@ -124,9 +124,12 @@ estructura escale sin reescribirse.
 - **Acceso a datos Oracle**: no aplica en el BFF — la conexión a Oracle vive
   en las Azure Functions. Si en el futuro el BFF necesita persistencia
   propia, documentar aquí driver (`ojdbc11`) y pool (HikariCP).
-- **Autenticación hacia Azure Functions**: definir si es Function Key,
-  Azure AD (Entra ID) app registration, o API Management delante de las
-  functions. *(pendiente de definir)*
+- **Autenticación hacia Azure Functions**: Function Key (`authLevel =
+  FUNCTION`), enviada por el BFF en el header `x-functions-key` (ver
+  `AzureFunctionsClientConfig`). El valor viene de la property
+  `azure-functions.function-key`, resuelta desde la env var
+  `AZURE_FUNCTIONS_KEY` — nunca hardcodeada. En `dev` tiene default vacío
+  (Core Tools local no valida la key); en `prod` es obligatoria.
 
 ## Base de datos Oracle
 
@@ -221,9 +224,31 @@ azure-functions/src/main/java/com/empresa/functions
 
 - Se despliega en **Azure** (Function App), no en la instancia EC2 — ese
   runtime es exclusivo del BFF.
-- Vía `azure-functions-maven-plugin` o un pipeline de CI/CD hacia Azure.
-- Plan de hosting (Consumption vs Premium vs Dedicated) — pendiente de
-  definir según tolerancia a cold start y presupuesto.
+- Vía `azure-functions-maven-plugin` (`mvn clean package azure-functions:deploy`,
+  con `ORACLE_JDBC_URL`/`ORACLE_DB_USER`/`ORACLE_DB_PASSWORD` como variables
+  de entorno del shell que despliega — nunca hardcodeadas en el `pom.xml`).
+- **Plan de hosting: Consumption.** Decidido — pago por uso, acorde a una
+  suscripción de estudiante/dev. Trade-off aceptado: cold start en la
+  primera invocación tras inactividad.
+- **Región: East US.** La región ideal por latencia hacia la Oracle ADB
+  (en `sa-santiago-1`, Chile) sería `brazilsouth`, pero la suscripción
+  "Azure for Students" la bloquea por política
+  (`RequestDisallowedByAzure`) — solo permite un set restringido de
+  regiones. `eastus` funcionó sin problema.
+- **Function App desplegado**: `fn-usuarios-roles` en el resource group
+  `rg-usuarios-roles`, URL `https://fn-usuarios-roles.azurewebsites.net`.
+  Function key requerida vía `?code=` o header `x-functions-key` (authLevel
+  FUNCTION).
+- **Networking hacia Oracle — pendiente de endurecer**: la Autonomous
+  Database usa una Access Control List (ACL) por IP/CIDR. El plan
+  Consumption sobre Linux no expone un set pequeño y confiable de IPs de
+  salida (`possibleOutboundIpAddresses` no fue suficiente en la práctica
+  aun cubriendo matemáticamente todo el rango reportado). Por ahora la
+  ACL quedó abierta (`0.0.0.0/0`) para desbloquear el desarrollo — la DB
+  sigue protegida por usuario/password + TLS, pero esto es temporal.
+  Opciones para endurecerlo más adelante: Function App en plan Premium
+  con integración VNET + NAT Gateway (IP de salida fija y chica), o
+  Oracle Private Endpoint dentro de una VCN peered con Azure.
 
 ## Dockerización del BFF
 
@@ -258,15 +283,16 @@ azure-functions/src/main/java/com/empresa/functions
 
 ## Pendientes a definir con el equipo
 
-- [ ] Mecanismo de autenticación del BFF hacia las Azure Functions.
 - [ ] Herramienta de migraciones de base de datos (Flyway vs Liquibase),
       a ejecutar desde `azure-functions/`.
 - [ ] Estrategia de CI/CD hacia la instancia EC2 (BFF) y hacia Azure
       (Functions) — son pipelines separados.
 - [ ] Si el BFF expone autenticación propia hacia el frontend (JWT, sesión)
       o delega en un servicio externo.
-- [ ] Plan de hosting de Azure Functions (Consumption / Premium /
-      Dedicated).
 - [ ] JDBC directo vs. micro-ORM para el acceso a Oracle desde las
       Functions.
 - [ ] Un Function App único vs. uno por dominio.
+- [ ] **Endurecer el acceso de red a Oracle** — hoy la ACL de la ADB está
+      abierta (`0.0.0.0/0`) porque el plan Consumption no da un set chico
+      de IPs de salida confiable. Evaluar Premium+VNET o Private Endpoint
+      antes de ir a un ambiente con datos reales.

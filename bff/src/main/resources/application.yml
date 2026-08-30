@@ -9,6 +9,7 @@ server:
 
 azure-functions:
   base-url: ${AZURE_FUNCTIONS_BASE_URL:http://localhost:7071}
+  function-key: ${AZURE_FUNCTIONS_KEY:}
   connect-timeout: 2s
   read-timeout: 5s
 

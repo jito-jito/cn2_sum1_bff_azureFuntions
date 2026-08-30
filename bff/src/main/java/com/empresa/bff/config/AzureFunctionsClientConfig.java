@@ -25,6 +25,9 @@ public class AzureFunctionsClientConfig {
                 .baseUrl(properties.baseUrl())
                 .requestFactory(requestFactory)
                 .requestInterceptor(correlationIdRequestInterceptor)
+                // Requerido por las Functions desplegadas en Azure (authLevel
+                // FUNCTION). En local con `func start` esta cabecera se ignora.
+                .defaultHeader("x-functions-key", properties.functionKey())
                 .build();
     }
 }

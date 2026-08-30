@@ -1,7 +1,8 @@
 azure-functions:
   # Sin valor por defecto a propósito: si falta la env var, la app no debe
-  # arrancar apuntando a localhost en producción.
+  # arrancar apuntando a localhost en producción, ni sin function key.
   base-url: ${AZURE_FUNCTIONS_BASE_URL}
+  function-key: ${AZURE_FUNCTIONS_KEY}
 
 logging:
   level:
