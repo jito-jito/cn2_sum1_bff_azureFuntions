@@ -107,8 +107,10 @@ estructura escale sin reescribirse.
   request-id desde el frontend hacia cada llamada a Azure Functions, para
   poder trazar un request a través de todo el flujo cuando haya varias
   integraciones en juego.
-- **Health checks por dependencia**: Actuator con un `HealthIndicator` por
-  cada Azure Function crítica, no solo el health genérico de la app.
+- **Health checks por dependencia**: implementado — un `HealthIndicator`
+  por Function (`usuariosFunction`, `rolesFunction` en
+  `HealthIndicatorsConfig`), visibles en `/actuator/health` con
+  `show-details`, en vez de solo el health genérico de la app.
 - **Cache opcional vía abstracción de Spring (`@Cacheable`)**: si el
   volumen crece, se puede pasar de cache local (Caffeine) a distribuida
   (Redis) sin tocar la capa de service, siempre que se use la abstracción
@@ -177,6 +179,11 @@ solo lo consume por HTTP (ver sección anterior).
   despliega directo a Azure).
 - **Acceso a datos Oracle**: JDBC directo (o un micro-ORM ligero, a
   definir) con driver `ojdbc11` + pool HikariCP.
+- **Validación de input**: Bean Validation (`jakarta.validation` +
+  Hibernate Validator standalone, sin Jakarta EL) sobre los DTOs de
+  request, vía `ValidationUtil` — un `Validator` singleton construido una
+  vez y reutilizado entre invocaciones (mismo motivo que
+  `DataSourceProvider`: evitar el costo de levantarlo en cada llamada).
 
 ### Estructura interna
 
