@@ -216,7 +216,7 @@ cargado por diseño.
 
 Transparencia sobre lo que falta cerrar:
 
-- [ ] **Desplegar el contenedor del BFF en una instancia EC2** — hoy el
+- [X] **Desplegar el contenedor del BFF en una instancia EC2** — hoy el
       Dockerfile está listo y probado localmente, pero el flujo
       Postman→BFF(EC2)→Functions→DB no se ha ejecutado de punta a punta
       con el BFF corriendo en AWS.
@@ -227,9 +227,6 @@ Transparencia sobre lo que falta cerrar:
       Endpoint.
 - [ ] **Herramienta de migraciones** (Flyway/Liquibase) — hoy `schema.sql`
       se aplica manualmente.
-- [ ] Repositorio sin remoto configurado todavía (se documenta el
-      historial de commits como evidencia de avance; publicar a GitHub
-      queda pendiente de decisión del equipo).
 
 ## Créditos
 
