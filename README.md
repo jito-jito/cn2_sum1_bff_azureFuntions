@@ -122,9 +122,16 @@ llama 1:1 a cada Function; el detalle función↔operación está en
   `Functions/service/repository` (Azure Functions) — evita que
   `controller/`, `service/`, etc. se vuelvan carpetas gigantes sin
   relación al sumar dominios.
-- **Validación de entrada** con Bean Validation en el BFF
-  (`@NotBlank`, `@Email`, `@NotNull` en los DTOs de request) antes de
-  llegar a la Function.
+- **Validación de entrada con Bean Validation en ambos lados**: `@Valid`
+  en el BFF (`@NotBlank`, `@Email`, `@Size`, `@NotNull` en los DTOs de
+  request) para fallar rápido antes de llegar a la Function, y la misma
+  validación repetida en las Functions vía `ValidationUtil` — como
+  también son invocables directamente (sin pasar por el BFF), no basta
+  con validar solo del lado del BFF.
+- **Health check por dependencia**: un `HealthIndicator` de Actuator por
+  cada Azure Function (`usuariosFunction`, `rolesFunction`), visibles en
+  `/actuator/health` — permite ver cuál dependencia específica está
+  fallando en vez de solo un status genérico de la app.
 - **Contrato de error único**: `GlobalExceptionHandler` en el BFF traduce
   validación (`400`), errores de la Function (propaga el status real,
   sin reinventar una traducción), circuito abierto de Resilience4j
@@ -213,13 +220,6 @@ Transparencia sobre lo que falta cerrar:
       Dockerfile está listo y probado localmente, pero el flujo
       Postman→BFF(EC2)→Functions→DB no se ha ejecutado de punta a punta
       con el BFF corriendo en AWS.
-- [ ] **Bean Validation en las Functions**: la validación de los DTOs de
-      entrada en `azure-functions` es manual y no cubre formato de email
-      ni largo de campos (sí cubre lo esencial: campos obligatorios y
-      unicidad a nivel de base de datos).
-- [ ] **Health checks por dependencia** en el BFF (`HealthIndicator` por
-      Function crítica) — hoy solo se expone el health genérico de
-      Actuator.
 - [ ] **Endurecer el acceso de red a Oracle**: la ACL de la Autonomous
       Database está abierta (`0.0.0.0/0`) porque el plan Consumption de
       Azure no expone un set chico y estable de IPs de salida. Alternativas
