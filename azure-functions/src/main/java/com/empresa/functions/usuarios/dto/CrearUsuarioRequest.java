@@ -1,4 +1,11 @@
 package com.empresa.functions.usuarios.dto;
 
-public record CrearUsuarioRequest(String username, String email, String nombreCompleto) {
+import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
+
+public record CrearUsuarioRequest(
+        @NotBlank @Size(max = 100) String username,
+        @NotBlank @Email @Size(max = 150) String email,
+        @Size(max = 200) String nombreCompleto) {
 }

@@ -175,9 +175,11 @@ Conflict`. Hay que desasignarlo de todos los usuarios primero.
 - **Usuario sin roles**: válido — un usuario puede crearse sin roles y
   asignárselos después.
 - **Roles "de sistema" protegidos**: no aplica en este alcance (ver §4).
-- [ ] Formato/validación de `email` y largo máximo de campos — definir en
-      el DTO de entrada del BFF (falla rápido, antes de llegar a la
-      Function). Detalle de implementación, no bloquea el scaffold.
+- **Formato/validación de `email` y largo máximo de campos**: implementado
+  con Bean Validation en ambos lados — `@Valid` en el BFF (falla rápido,
+  antes de llegar a la Function) y `ValidationUtil` en las Functions
+  (defensa en profundidad, ya que también son invocables directamente sin
+  pasar por el BFF).
 
 ## 9. Seguridad (referencia)
 

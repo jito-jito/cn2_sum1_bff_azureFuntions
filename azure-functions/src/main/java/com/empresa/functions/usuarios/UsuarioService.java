@@ -1,6 +1,6 @@
 package com.empresa.functions.usuarios;
 
-import com.empresa.functions.common.exception.ValidationException;
+import com.empresa.functions.common.ValidationUtil;
 import com.empresa.functions.usuarios.dto.ActualizarUsuarioRequest;
 import com.empresa.functions.usuarios.dto.CrearUsuarioRequest;
 import com.empresa.functions.usuarios.dto.UsuarioDto;
@@ -19,7 +19,7 @@ public class UsuarioService {
     }
 
     public UsuarioDto crear(CrearUsuarioRequest request) {
-        validar(request.username(), request.email());
+        ValidationUtil.validate(request);
         return repository.crear(request);
     }
 
@@ -32,7 +32,7 @@ public class UsuarioService {
     }
 
     public UsuarioDto actualizar(Long id, ActualizarUsuarioRequest request) {
-        validar(request.username(), request.email());
+        ValidationUtil.validate(request);
         return repository.actualizar(id, request);
     }
 
@@ -41,22 +41,10 @@ public class UsuarioService {
     }
 
     public void asignarRol(Long usuarioId, Long rolId) {
-        if (rolId == null) {
-            throw new ValidationException("rolId es obligatorio");
-        }
         repository.asignarRol(usuarioId, rolId);
     }
 
     public void quitarRol(Long usuarioId, Long rolId) {
         repository.quitarRol(usuarioId, rolId);
-    }
-
-    private void validar(String username, String email) {
-        if (username == null || username.isBlank()) {
-            throw new ValidationException("username es obligatorio");
-        }
-        if (email == null || email.isBlank()) {
-            throw new ValidationException("email es obligatorio");
-        }
     }
 }

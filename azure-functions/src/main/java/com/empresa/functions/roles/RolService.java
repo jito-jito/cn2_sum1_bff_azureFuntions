@@ -1,6 +1,6 @@
 package com.empresa.functions.roles;
 
-import com.empresa.functions.common.exception.ValidationException;
+import com.empresa.functions.common.ValidationUtil;
 import com.empresa.functions.roles.dto.ActualizarRolRequest;
 import com.empresa.functions.roles.dto.CrearRolRequest;
 import com.empresa.functions.roles.dto.RolDto;
@@ -19,9 +19,7 @@ public class RolService {
     }
 
     public RolDto crear(CrearRolRequest request) {
-        if (request.nombre() == null || request.nombre().isBlank()) {
-            throw new ValidationException("nombre es obligatorio");
-        }
+        ValidationUtil.validate(request);
         return repository.crear(request);
     }
 
@@ -34,9 +32,7 @@ public class RolService {
     }
 
     public RolDto actualizar(Long id, ActualizarRolRequest request) {
-        if (request.nombre() == null || request.nombre().isBlank()) {
-            throw new ValidationException("nombre es obligatorio");
-        }
+        ValidationUtil.validate(request);
         return repository.actualizar(id, request);
     }
 

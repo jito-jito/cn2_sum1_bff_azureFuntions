@@ -2,6 +2,7 @@ package com.empresa.functions.usuarios;
 
 import com.empresa.functions.common.HttpResponseUtil;
 import com.empresa.functions.common.JsonUtil;
+import com.empresa.functions.common.ValidationUtil;
 import com.empresa.functions.common.exception.ConflictException;
 import com.empresa.functions.common.exception.NotFoundException;
 import com.empresa.functions.common.exception.ValidationException;
@@ -87,6 +88,7 @@ public class UsuarioFunctions {
         return handle(request, context, () -> {
             AsignarRolRequest body = JsonUtil.mapper().readValue(request.getBody().orElse("{}"),
                     AsignarRolRequest.class);
+            ValidationUtil.validate(body);
             service.asignarRol(id, body.rolId());
             return request.createResponseBuilder(HttpStatus.NO_CONTENT).build();
         });

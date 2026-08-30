@@ -1,4 +1,6 @@
 package com.empresa.functions.usuarios.dto;
 
-public record AsignarRolRequest(Long rolId) {
+import jakarta.validation.constraints.NotNull;
+
+public record AsignarRolRequest(@NotNull Long rolId) {
 }
