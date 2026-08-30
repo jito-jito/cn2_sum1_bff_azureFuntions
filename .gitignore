@@ -1,0 +1,20 @@
+target/
+*.class
+*.log
+.idea/
+*.iml
+.vscode/
+.DS_Store
+
+# Azure Functions local dev — nunca commitear (contiene cadena de conexión a Oracle)
+azure-functions/local.settings.json
+azure-functions/bin/
+azure-functions/obj/
+
+# BFF local dev
+bff/.env
+
+# Llaves/certificados — nunca commitear
+*.pem
+*.key
+*.ppk

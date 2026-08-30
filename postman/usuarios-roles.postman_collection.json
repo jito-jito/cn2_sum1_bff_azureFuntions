@@ -1,0 +1,378 @@
+{
+  "info": {
+    "_postman_id": "1771630a-9cf4-4c2a-9578-a7f44c64036d",
+    "name": "Sistema de Gestión de Usuarios y Roles",
+    "description": "BFF (Spring Boot) y Azure Functions del sistema de Usuarios y Roles. Ver CLAUDE.md y docs/gestion-usuarios-roles.md en el repo para el detalle de arquitectura y decisiones.\n\nVariables de colección:\n- bffUrl: base del BFF (default http://localhost:8080)\n- functionsUrl: base de las Azure Functions (default http://localhost:7071/api)\n- functionKey: function key de Azure (solo necesaria contra una Function App desplegada; en local con `func start` se ignora)\n- usuarioId / rolId: ids usados en los endpoints con {id}, actualízalos según lo que hayas creado",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "bffUrl", "value": "http://localhost:8080", "type": "string" },
+    { "key": "functionsUrl", "value": "http://localhost:7071/api", "type": "string" },
+    { "key": "functionKey", "value": "", "type": "string" },
+    { "key": "usuarioId", "value": "1", "type": "string" },
+    { "key": "rolId", "value": "1", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "BFF",
+      "description": "Orquesta las llamadas a las Azure Functions. Sin acceso directo a Oracle.",
+      "item": [
+        {
+          "name": "Usuarios",
+          "item": [
+            {
+              "name": "Crear usuario",
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"username\": \"jperez\",\n  \"email\": \"jperez@example.com\",\n  \"nombreCompleto\": \"Juan Perez\"\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "url": { "raw": "{{bffUrl}}/usuarios", "host": ["{{bffUrl}}"], "path": ["usuarios"] },
+                "description": "201 Created con Location. 409 si username/email ya existen. 400 si falla la validación (@Valid)."
+              }
+            },
+            {
+              "name": "Listar usuarios",
+              "request": {
+                "method": "GET",
+                "url": { "raw": "{{bffUrl}}/usuarios", "host": ["{{bffUrl}}"], "path": ["usuarios"] }
+              }
+            },
+            {
+              "name": "Obtener usuario",
+              "request": {
+                "method": "GET",
+                "url": {
+                  "raw": "{{bffUrl}}/usuarios/{{usuarioId}}",
+                  "host": ["{{bffUrl}}"],
+                  "path": ["usuarios", "{{usuarioId}}"]
+                },
+                "description": "Devuelve el usuario con sus roles ya resueltos (join hecho en la Function)."
+              }
+            },
+            {
+              "name": "Actualizar usuario",
+              "request": {
+                "method": "PUT",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"username\": \"jperez\",\n  \"email\": \"jperez@example.com\",\n  \"nombreCompleto\": \"Juan Perez Actualizado\"\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "url": {
+                  "raw": "{{bffUrl}}/usuarios/{{usuarioId}}",
+                  "host": ["{{bffUrl}}"],
+                  "path": ["usuarios", "{{usuarioId}}"]
+                }
+              }
+            },
+            {
+              "name": "Eliminar usuario",
+              "request": {
+                "method": "DELETE",
+                "url": {
+                  "raw": "{{bffUrl}}/usuarios/{{usuarioId}}",
+                  "host": ["{{bffUrl}}"],
+                  "path": ["usuarios", "{{usuarioId}}"]
+                },
+                "description": "204 No Content. Borrado lógico (ESTADO=INACTIVO), no elimina la fila."
+              }
+            },
+            {
+              "name": "Asignar rol a usuario",
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"rolId\": {{rolId}}\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "url": {
+                  "raw": "{{bffUrl}}/usuarios/{{usuarioId}}/roles",
+                  "host": ["{{bffUrl}}"],
+                  "path": ["usuarios", "{{usuarioId}}", "roles"]
+                },
+                "description": "204 No Content. Idempotente: asignar un rol ya asignado no falla."
+              }
+            },
+            {
+              "name": "Quitar rol de usuario",
+              "request": {
+                "method": "DELETE",
+                "url": {
+                  "raw": "{{bffUrl}}/usuarios/{{usuarioId}}/roles/{{rolId}}",
+                  "host": ["{{bffUrl}}"],
+                  "path": ["usuarios", "{{usuarioId}}", "roles", "{{rolId}}"]
+                },
+                "description": "204 No Content. 404 si el usuario no tenía ese rol asignado."
+              }
+            }
+          ]
+        },
+        {
+          "name": "Roles",
+          "item": [
+            {
+              "name": "Crear rol",
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"nombre\": \"ADMIN\",\n  \"descripcion\": \"Administrador del sistema\"\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "url": { "raw": "{{bffUrl}}/roles", "host": ["{{bffUrl}}"], "path": ["roles"] },
+                "description": "201 Created. 409 si el nombre del rol ya existe."
+              }
+            },
+            {
+              "name": "Listar roles",
+              "request": {
+                "method": "GET",
+                "url": { "raw": "{{bffUrl}}/roles", "host": ["{{bffUrl}}"], "path": ["roles"] }
+              }
+            },
+            {
+              "name": "Obtener rol",
+              "request": {
+                "method": "GET",
+                "url": {
+                  "raw": "{{bffUrl}}/roles/{{rolId}}",
+                  "host": ["{{bffUrl}}"],
+                  "path": ["roles", "{{rolId}}"]
+                }
+              }
+            },
+            {
+              "name": "Actualizar rol",
+              "request": {
+                "method": "PUT",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"nombre\": \"ADMIN\",\n  \"descripcion\": \"Administrador del sistema (actualizado)\"\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "url": {
+                  "raw": "{{bffUrl}}/roles/{{rolId}}",
+                  "host": ["{{bffUrl}}"],
+                  "path": ["roles", "{{rolId}}"]
+                }
+              }
+            },
+            {
+              "name": "Eliminar rol",
+              "request": {
+                "method": "DELETE",
+                "url": {
+                  "raw": "{{bffUrl}}/roles/{{rolId}}",
+                  "host": ["{{bffUrl}}"],
+                  "path": ["roles", "{{rolId}}"]
+                },
+                "description": "204 No Content. 409 si el rol tiene usuarios asignados (regla de negocio: no se puede eliminar un rol en uso)."
+              }
+            }
+          ]
+        },
+        {
+          "name": "Health check",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{bffUrl}}/actuator/health", "host": ["{{bffUrl}}"], "path": ["actuator", "health"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Azure Functions",
+      "description": "Acceso directo a las Functions (sin pasar por el BFF), útil para debug. En Azure desplegado requieren la function key en el header x-functions-key; en local con `func start` no se valida.",
+      "item": [
+        {
+          "name": "Usuarios",
+          "item": [
+            {
+              "name": "CrearUsuario",
+              "request": {
+                "method": "POST",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "x-functions-key", "value": "{{functionKey}}" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"username\": \"jperez\",\n  \"email\": \"jperez@example.com\",\n  \"nombreCompleto\": \"Juan Perez\"\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "url": { "raw": "{{functionsUrl}}/usuarios", "host": ["{{functionsUrl}}"], "path": ["usuarios"] }
+              }
+            },
+            {
+              "name": "ListarUsuarios",
+              "request": {
+                "method": "GET",
+                "header": [{ "key": "x-functions-key", "value": "{{functionKey}}" }],
+                "url": { "raw": "{{functionsUrl}}/usuarios", "host": ["{{functionsUrl}}"], "path": ["usuarios"] }
+              }
+            },
+            {
+              "name": "ObtenerUsuario",
+              "request": {
+                "method": "GET",
+                "header": [{ "key": "x-functions-key", "value": "{{functionKey}}" }],
+                "url": {
+                  "raw": "{{functionsUrl}}/usuarios/{{usuarioId}}",
+                  "host": ["{{functionsUrl}}"],
+                  "path": ["usuarios", "{{usuarioId}}"]
+                }
+              }
+            },
+            {
+              "name": "ActualizarUsuario",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "x-functions-key", "value": "{{functionKey}}" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"username\": \"jperez\",\n  \"email\": \"jperez@example.com\",\n  \"nombreCompleto\": \"Juan Perez Actualizado\"\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "url": {
+                  "raw": "{{functionsUrl}}/usuarios/{{usuarioId}}",
+                  "host": ["{{functionsUrl}}"],
+                  "path": ["usuarios", "{{usuarioId}}"]
+                }
+              }
+            },
+            {
+              "name": "EliminarUsuario",
+              "request": {
+                "method": "DELETE",
+                "header": [{ "key": "x-functions-key", "value": "{{functionKey}}" }],
+                "url": {
+                  "raw": "{{functionsUrl}}/usuarios/{{usuarioId}}",
+                  "host": ["{{functionsUrl}}"],
+                  "path": ["usuarios", "{{usuarioId}}"]
+                }
+              }
+            },
+            {
+              "name": "AsignarRolAUsuario",
+              "request": {
+                "method": "POST",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "x-functions-key", "value": "{{functionKey}}" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"rolId\": {{rolId}}\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "url": {
+                  "raw": "{{functionsUrl}}/usuarios/{{usuarioId}}/roles",
+                  "host": ["{{functionsUrl}}"],
+                  "path": ["usuarios", "{{usuarioId}}", "roles"]
+                }
+              }
+            },
+            {
+              "name": "QuitarRolDeUsuario",
+              "request": {
+                "method": "DELETE",
+                "header": [{ "key": "x-functions-key", "value": "{{functionKey}}" }],
+                "url": {
+                  "raw": "{{functionsUrl}}/usuarios/{{usuarioId}}/roles/{{rolId}}",
+                  "host": ["{{functionsUrl}}"],
+                  "path": ["usuarios", "{{usuarioId}}", "roles", "{{rolId}}"]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Roles",
+          "item": [
+            {
+              "name": "CrearRol",
+              "request": {
+                "method": "POST",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "x-functions-key", "value": "{{functionKey}}" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"nombre\": \"ADMIN\",\n  \"descripcion\": \"Administrador del sistema\"\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "url": { "raw": "{{functionsUrl}}/roles", "host": ["{{functionsUrl}}"], "path": ["roles"] }
+              }
+            },
+            {
+              "name": "ListarRoles",
+              "request": {
+                "method": "GET",
+                "header": [{ "key": "x-functions-key", "value": "{{functionKey}}" }],
+                "url": { "raw": "{{functionsUrl}}/roles", "host": ["{{functionsUrl}}"], "path": ["roles"] }
+              }
+            },
+            {
+              "name": "ObtenerRol",
+              "request": {
+                "method": "GET",
+                "header": [{ "key": "x-functions-key", "value": "{{functionKey}}" }],
+                "url": {
+                  "raw": "{{functionsUrl}}/roles/{{rolId}}",
+                  "host": ["{{functionsUrl}}"],
+                  "path": ["roles", "{{rolId}}"]
+                }
+              }
+            },
+            {
+              "name": "ActualizarRol",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "x-functions-key", "value": "{{functionKey}}" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"nombre\": \"ADMIN\",\n  \"descripcion\": \"Administrador del sistema (actualizado)\"\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "url": {
+                  "raw": "{{functionsUrl}}/roles/{{rolId}}",
+                  "host": ["{{functionsUrl}}"],
+                  "path": ["roles", "{{rolId}}"]
+                }
+              }
+            },
+            {
+              "name": "EliminarRol",
+              "request": {
+                "method": "DELETE",
+                "header": [{ "key": "x-functions-key", "value": "{{functionKey}}" }],
+                "url": {
+                  "raw": "{{functionsUrl}}/roles/{{rolId}}",
+                  "host": ["{{functionsUrl}}"],
+                  "path": ["roles", "{{rolId}}"]
+                },
+                "description": "409 si el rol tiene usuarios asignados."
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

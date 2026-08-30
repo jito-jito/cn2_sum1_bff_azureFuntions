@@ -1,0 +1,6 @@
+azure-functions:
+  base-url: http://localhost:7071
+
+logging:
+  level:
+    com.empresa.bff: DEBUG
