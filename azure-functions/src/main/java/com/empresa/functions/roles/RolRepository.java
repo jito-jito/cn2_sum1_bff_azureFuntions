@@ -6,6 +6,7 @@ import com.empresa.functions.common.exception.NotFoundException;
 import com.empresa.functions.roles.dto.ActualizarRolRequest;
 import com.empresa.functions.roles.dto.CrearRolRequest;
 import com.empresa.functions.roles.dto.RolDto;
+import com.empresa.functions.roles.dto.UsuarioResumenDto;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -97,6 +98,28 @@ public class RolRepository {
             }
         } catch (SQLException e) {
             throw new RuntimeException("Error al eliminar rol " + id, e);
+        }
+    }
+
+    /** Relacion inversa de USUARIO_ROL, usada por la capa GraphQL (Rol.usuarios). */
+    public List<UsuarioResumenDto> usuariosDelRol(Long rolId) {
+        String sql = "SELECT U.ID, U.USERNAME, U.EMAIL, U.ESTADO "
+                + "FROM USUARIO_ROL UR JOIN USUARIOS U ON U.ID = UR.USUARIO_ID "
+                + "WHERE UR.ROL_ID = ? ORDER BY U.ID";
+        try (Connection conn = DataSourceProvider.get().getConnection();
+                PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setLong(1, rolId);
+            try (ResultSet rs = ps.executeQuery()) {
+                List<UsuarioResumenDto> usuarios = new ArrayList<>();
+                while (rs.next()) {
+                    usuarios.add(new UsuarioResumenDto(
+                            rs.getLong("ID"), rs.getString("USERNAME"),
+                            rs.getString("EMAIL"), rs.getString("ESTADO")));
+                }
+                return usuarios;
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Error al obtener usuarios del rol " + rolId, e);
         }
     }
 

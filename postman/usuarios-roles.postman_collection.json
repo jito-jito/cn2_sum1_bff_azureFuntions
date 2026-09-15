@@ -371,6 +371,76 @@
               }
             }
           ]
+        },
+        {
+          "name": "GraphQL",
+          "description": "Solo lecturas. Body {\"query\", \"variables\"}, respuesta {\"data\", \"errors\"} (siempre HTTP 200, aun con errores de resolución).",
+          "item": [
+            {
+              "name": "Usuarios con roles anidados",
+              "request": {
+                "method": "POST",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "x-functions-key", "value": "{{functionKey}}" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"query\": \"{ usuarios { id username estado roles { id nombre } } }\"\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "url": { "raw": "{{functionsUrl}}/graphql/usuarios", "host": ["{{functionsUrl}}"], "path": ["graphql", "usuarios"] }
+              }
+            },
+            {
+              "name": "Usuario por id",
+              "request": {
+                "method": "POST",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "x-functions-key", "value": "{{functionKey}}" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"query\": \"query($id: ID!) { usuario(id: $id) { id username fechaCreacion roles { nombre } } }\",\n  \"variables\": { \"id\": \"{{usuarioId}}\" }\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "url": { "raw": "{{functionsUrl}}/graphql/usuarios", "host": ["{{functionsUrl}}"], "path": ["graphql", "usuarios"] }
+              }
+            },
+            {
+              "name": "Roles con usuarios anidados (relacion inversa)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "x-functions-key", "value": "{{functionKey}}" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"query\": \"{ roles { id nombre usuarios { id username } } }\"\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "url": { "raw": "{{functionsUrl}}/graphql/roles", "host": ["{{functionsUrl}}"], "path": ["graphql", "roles"] }
+              }
+            },
+            {
+              "name": "Rol por id",
+              "request": {
+                "method": "POST",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "x-functions-key", "value": "{{functionKey}}" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"query\": \"query($id: ID!) { rol(id: $id) { id nombre usuarios { username } } }\",\n  \"variables\": { \"id\": \"{{rolId}}\" }\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "url": { "raw": "{{functionsUrl}}/graphql/roles", "host": ["{{functionsUrl}}"], "path": ["graphql", "roles"] }
+              }
+            }
+          ]
         }
       ]
     }

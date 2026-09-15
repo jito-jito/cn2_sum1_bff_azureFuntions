@@ -50,6 +50,7 @@ desacoplados en una arquitectura serverless/BFF.
 | Build | Maven | Maven (`azure-functions-maven-plugin`) |
 | Cliente HTTP | `RestClient` (Spring 6) | — |
 | Acceso a datos | Ninguno (no toca Oracle) | JDBC directo + HikariCP |
+| GraphQL | — | `graphql-java` puro, solo lecturas (`usuarios`, `roles`) |
 | Resiliencia | Resilience4j (circuit breaker + retry, aislado por dominio) | Reintentos a nivel de driver JDBC (connect descriptor) |
 | Despliegue | Docker → EC2 (AWS) | `azure-functions-maven-plugin` → Function App (Azure) |
 
@@ -74,9 +75,11 @@ liviano de Azure Functions.
 │   └── .env.example              variables requeridas para correr en EC2
 ├── azure-functions/              Java, sin Spring — Azure Functions
 │   ├── src/main/java/com/empresa/functions/
-│   │   ├── common/               DataSourceProvider, JSON/HTTP utils, excepciones
-│   │   ├── usuarios/             Functions / service / repository / dto
-│   │   └── roles/                Functions / service / repository / dto
+│   │   ├── common/                    DataSourceProvider, JSON/HTTP utils, excepciones, GraphQLHttpHandler
+│   │   ├── usuarios/                  Functions REST / service / repository / dto
+│   │   │   └── graphql/               UsuarioGraphQLSchema (queries: usuarios, usuario)
+│   │   └── roles/                     Functions REST / service / repository / dto
+│   │       └── graphql/               RolGraphQLSchema (queries: roles, rol)
 │   └── sql/schema.sql            DDL de Oracle
 ├── docs/gestion-usuarios-roles.md  Definiciones del requerimiento
 ├── postman/                      Colección Postman (BFF + Functions)
@@ -115,6 +118,22 @@ Mismas rutas, con auth `x-functions-key` (ver `?code=` o header). El BFF
 llama 1:1 a cada Function; el detalle función↔operación está en
 `docs/gestion-usuarios-roles.md §6`.
 
+Además de REST, dos Functions exponen **GraphQL** (solo lectura), una por
+dominio, con auth `x-functions-key` igual que las REST:
+
+| Endpoint | Queries |
+|---|---|
+| `POST /api/graphql/usuarios` | `usuarios`, `usuario(id)` — con `roles` anidado |
+| `POST /api/graphql/roles` | `roles`, `rol(id)` — con `usuarios` anidado (relación inversa, sin equivalente REST) |
+
+Body: `{"query": "...", "variables": {...}}`. Ejemplo:
+
+```bash
+curl -X POST "$FUNCTIONS_URL/api/graphql/roles?code=$FUNCTION_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"query":"{ roles { id nombre usuarios { username } } }"}'
+```
+
 ## 6. Buenas prácticas implementadas
 
 - **Capas separadas por dominio**, no por capa global: `usuarios/` y
@@ -128,6 +147,13 @@ llama 1:1 a cada Function; el detalle función↔operación está en
   validación repetida en las Functions vía `ValidationUtil` — como
   también son invocables directamente (sin pasar por el BFF), no basta
   con validar solo del lado del BFF.
+- **REST + GraphQL complementarios, no redundantes**: las Functions REST
+  cubren el CRUD completo; GraphQL solo cubre lecturas donde aporta algo
+  que REST no da gratis — forma de respuesta variable (el cliente pide
+  justo los campos que necesita) y navegar la relación N:M
+  usuario↔rol en ambos sentidos (`Usuario.roles` y, sin necesidad de un
+  endpoint REST nuevo, `Rol.usuarios`). Cada dominio tiene su propio
+  schema SDL independiente (`usuarios/graphql/`, `roles/graphql/`).
 - **Health check por dependencia**: un `HealthIndicator` de Actuator por
   cada Azure Function (`usuariosFunction`, `rolesFunction`), visibles en
   `/actuator/health` — permite ver cuál dependencia específica está
