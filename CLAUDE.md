@@ -184,6 +184,43 @@ solo lo consume por HTTP (ver sección anterior).
   request, vía `ValidationUtil` — un `Validator` singleton construido una
   vez y reutilizado entre invocaciones (mismo motivo que
   `DataSourceProvider`: evitar el costo de levantarlo en cada llamada).
+- **GraphQL** (lecturas): `graphql-java` puro (sin un framework GraphQL
+  encima, mismo motivo que no usar Spring: no suma peso de arranque). Ver
+  "Capas REST y GraphQL" más abajo.
+
+### Capas REST y GraphQL
+
+Cada Function serverless expone **REST** (CRUD completo, como siempre) y,
+para los dos dominios de lectura donde tiene sentido navegar la relación
+usuario↔rol, **también GraphQL**:
+
+- `UsuarioFunctions` (REST, CRUD completo) + `UsuarioGraphQLFunction`
+  (`POST /api/graphql/usuarios`, solo queries: `usuarios`, `usuario(id)`,
+  con `Usuario.roles` ya resuelto porque `UsuarioRepository` arma esa
+  relación con una query batched, sin N+1).
+- `RolFunctions` (REST, CRUD completo) + `RolGraphQLFunction`
+  (`POST /api/graphql/roles`, solo queries: `roles`, `rol(id)`, con
+  `Rol.usuarios` — la relación inversa, que no existe como endpoint REST).
+
+Cada Function GraphQL tiene su **propio schema SDL independiente**
+(`UsuarioGraphQLSchema` / `RolGraphQLSchema`, en un subpaquete `graphql/`
+de cada dominio) en vez de un schema único compartido: mantiene cada
+dominio autocontenido, igual que ya son independientes sus `Function`,
+`service` y `repository` REST. El motor `GraphQL` se construye una sola
+vez como `static final` (mismo patrón que `DataSourceProvider`/
+`ValidationUtil`: evitar el costo de parsear el SDL en cada invocación
+"caliente").
+
+**Gotcha de Java a tener en cuenta si se agregan más argumentos**:
+`DataFetchingEnvironment.getArgument(String)` es genérico (`<T> T`). Pasarlo
+directo a un método sobrecargado como `String.valueOf(...)` deja que el
+compilador infiera `T` como el tipo del overload más específico —
+`String.valueOf(char[])` en vez de `String.valueOf(Object)` — e inserta un
+cast a `char[]` que revienta en runtime (`ClassCastException: String
+cannot be cast to [C`) aunque el valor real sea un `String`. Se soluciona
+declarando el tipo explícito primero: `String raw = env.getArgument("id");`
+y recién ahí operar sobre `raw` (ver `UsuarioGraphQLSchema`/
+`RolGraphQLSchema`).
 
 ### Estructura interna
 
