@@ -1,5 +1,6 @@
 package com.empresa.functions.usuarios;
 
+import com.empresa.functions.common.HttpRequestUtil;
 import com.empresa.functions.common.HttpResponseUtil;
 import com.empresa.functions.common.JsonUtil;
 import com.empresa.functions.common.ValidationUtil;
@@ -33,7 +34,8 @@ public class UsuarioFunctions {
         return handle(request, context, () -> {
             CrearUsuarioRequest body = JsonUtil.mapper().readValue(request.getBody().orElse("{}"),
                     CrearUsuarioRequest.class);
-            return HttpResponseUtil.json(request, HttpStatus.CREATED, service.crear(body));
+            return HttpResponseUtil.json(request, HttpStatus.CREATED,
+                    service.crear(body, HttpRequestUtil.correlationId(request)));
         });
     }
 
@@ -63,7 +65,8 @@ public class UsuarioFunctions {
         return handle(request, context, () -> {
             ActualizarUsuarioRequest body = JsonUtil.mapper().readValue(request.getBody().orElse("{}"),
                     ActualizarUsuarioRequest.class);
-            return HttpResponseUtil.json(request, HttpStatus.OK, service.actualizar(id, body));
+            return HttpResponseUtil.json(request, HttpStatus.OK,
+                    service.actualizar(id, body, HttpRequestUtil.correlationId(request)));
         });
     }
 
@@ -74,7 +77,7 @@ public class UsuarioFunctions {
             @BindingName("id") long id,
             ExecutionContext context) {
         return handle(request, context, () -> {
-            service.eliminar(id);
+            service.eliminar(id, HttpRequestUtil.correlationId(request));
             return request.createResponseBuilder(HttpStatus.NO_CONTENT).build();
         });
     }
@@ -89,7 +92,7 @@ public class UsuarioFunctions {
             AsignarRolRequest body = JsonUtil.mapper().readValue(request.getBody().orElse("{}"),
                     AsignarRolRequest.class);
             ValidationUtil.validate(body);
-            service.asignarRol(id, body.rolId());
+            service.asignarRol(id, body.rolId(), HttpRequestUtil.correlationId(request));
             return request.createResponseBuilder(HttpStatus.NO_CONTENT).build();
         });
     }
@@ -102,7 +105,7 @@ public class UsuarioFunctions {
             @BindingName("rolId") long rolId,
             ExecutionContext context) {
         return handle(request, context, () -> {
-            service.quitarRol(id, rolId);
+            service.quitarRol(id, rolId, HttpRequestUtil.correlationId(request));
             return request.createResponseBuilder(HttpStatus.NO_CONTENT).build();
         });
     }

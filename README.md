@@ -7,6 +7,9 @@ las que ejecutan la lógica de dominio y el acceso a una base de datos
 
 ```
 Postman  →  BFF (Spring Boot, Docker/EC2)  →  Azure Functions (Java)  →  Oracle ADB
+                                                   │ eventos de dominio
+                                                   ▼
+                                      Azure Event Grid  →  Functions consumidoras (auditoría, cascada)
 ```
 
 Este documento explica la arquitectura, las decisiones técnicas y cómo
@@ -25,15 +28,23 @@ flowchart LR
     end
     BFF -->|x-functions-key| FN
     subgraph AZ["Azure (Function App, Consumption)"]
-        FN["Azure Functions · Java\nCRUD, reglas de negocio"]
+        FN["Azure Functions · Java\nCRUD, reglas de negocio\n(generadoras de eventos)"]
+        CONS["Functions consumidoras\nAuditarEvento\nQuitarRolesDeUsuarioEliminado"]
     end
     FN -->|JDBC / TCPS| DB[(Oracle Autonomous DB)]
+    FN -->|publica EventGridEvent| EG{{"Event Grid Topic\negt-usuarios-roles"}}
+    EG -->|suscripciones| CONS
+    CONS -->|JDBC / TCPS| DB
 ```
+
+El detalle del flujo de eventos (topic, suscripciones, catálogo de eventos)
+está en la [sección 6](#6-arquitectura-orientada-a-eventos-azure-event-grid).
 
 | Componente | Responsabilidad | Por qué se usó |
 |---|---|---|
 | **BFF** (Spring Boot) | Expone la API REST, valida el input (Bean Validation), orquesta las llamadas a las Functions, aísla fallos por dependencia (Resilience4j) y devuelve un contrato de error único. **No** tiene acceso a Oracle. | Es la pieza pedida por el requerimiento como "microservicio en Docker + EC2"; separa al consumidor (Postman/frontend) del contrato interno de las Functions. |
-| **Azure Functions** (Java) | Implementa el CRUD real de `Usuario`/`Rol`, las reglas de negocio (borrado lógico, unicidad, bloqueo de eliminación de un rol en uso) y el único acceso a Oracle. | Cumple el requisito de que la lógica CRUD corra en funciones serverless; Java se eligió para compartir lenguaje/convenciones con el BFF. |
+| **Azure Functions** (Java) | Implementa el CRUD real de `Usuario`/`Rol`, las reglas de negocio (borrado lógico, unicidad, bloqueo de eliminación de un rol en uso) y el único acceso a Oracle. Las Functions CRUD además **publican eventos de dominio**, y dos Functions **consumidoras** reaccionan a ellos. | Cumple el requisito de que la lógica CRUD corra en funciones serverless; Java se eligió para compartir lenguaje/convenciones con el BFF. |
+| **Azure Event Grid** (Topic) | Recibe los eventos de dominio (`UsuarioCreado`, `RolAsignado`, `UsuarioEliminado`…) y los entrega por push a las Functions consumidoras según sus suscripciones, con reintentos y dead-letter. | Requisito de la Exp3: resolver parte del requerimiento con una arquitectura orientada a eventos (ver §6). |
 | **Oracle Autonomous Database** | Persistencia de `USUARIOS`, `ROLES` y la relación N:M `USUARIO_ROL`. | Motor provisto por la cátedra/infraestructura disponible (OCI Free Tier). |
 
 El BFF y las Functions son **dos proyectos Maven independientes** (sin
@@ -52,6 +63,7 @@ desacoplados en una arquitectura serverless/BFF.
 | Acceso a datos | Ninguno (no toca Oracle) | JDBC directo + HikariCP |
 | GraphQL | — | `graphql-java` puro, solo lecturas (`usuarios`, `roles`) |
 | Resiliencia | Resilience4j (circuit breaker + retry, aislado por dominio) | Reintentos a nivel de driver JDBC (connect descriptor) |
+| Eventos | — | Azure Event Grid: publicación con `azure-messaging-eventgrid`, consumo con `@EventGridTrigger` |
 | Despliegue | Docker → EC2 (AWS) | `azure-functions-maven-plugin` → Function App (Azure) |
 
 **Por qué sin Spring en las Functions**: en un runtime serverless, levantar
@@ -70,17 +82,22 @@ liviano de Azure Functions.
 │   │   │   ├── exception/        GlobalExceptionHandler, ApiError
 │   │   │   └── web/              Correlation-id (filtro + interceptor)
 │   │   ├── usuarios/             controller / service / client / dto
-│   │   └── roles/                controller / service / client / dto
+│   │   ├── roles/                controller / service / client / dto
+│   │   └── auditoria/            controller / service / client / dto (GET /auditoria)
 │   ├── Dockerfile                build multi-stage (Maven → JRE Alpine)
 │   └── .env.example              variables requeridas para correr en EC2
 ├── azure-functions/              Java, sin Spring — Azure Functions
 │   ├── src/main/java/com/empresa/functions/
 │   │   ├── common/                    DataSourceProvider, JSON/HTTP utils, excepciones, GraphQLHttpHandler
+│   │   │   └── eventos/               EventGridEventPublisher, EventoDominio, TiposEvento, EventoRecibido
 │   │   ├── usuarios/                  Functions REST / service / repository / dto
+│   │   │   ├── UsuarioEventosFunction consumidora: QuitarRolesDeUsuarioEliminado
 │   │   │   └── graphql/               UsuarioGraphQLSchema (queries: usuarios, usuario)
-│   │   └── roles/                     Functions REST / service / repository / dto
-│   │       └── graphql/               RolGraphQLSchema (queries: roles, rol)
-│   └── sql/schema.sql            DDL de Oracle
+│   │   ├── roles/                     Functions REST / service / repository / dto
+│   │   │   └── graphql/               RolGraphQLSchema (queries: roles, rol)
+│   │   └── auditoria/                 consumidora AuditarEvento + ListarAuditoria (REST)
+│   └── sql/                      schema.sql + auditoria_eventos.sql (DDL de Oracle)
+├── infra/eventgrid/              setup-eventgrid.sh — topic + suscripciones (az CLI)
 ├── docs/gestion-usuarios-roles.md  Definiciones del requerimiento
 ├── postman/                      Colección Postman (BFF + Functions)
 └── CLAUDE.md                     Fuente de verdad de arquitectura y stack
@@ -111,6 +128,7 @@ entidad de catálogo, no de autenticación), IDs generados con
 | Usuario | `POST` `GET` `GET` `PUT` `DELETE` | `/usuarios`, `/usuarios`, `/usuarios/{id}`, `/usuarios/{id}`, `/usuarios/{id}` |
 | Usuario–Rol | `POST` `DELETE` | `/usuarios/{id}/roles`, `/usuarios/{id}/roles/{rolId}` |
 | Rol | `POST` `GET` `GET` `PUT` `DELETE` | `/roles`, `/roles`, `/roles/{id}`, `/roles/{id}`, `/roles/{id}` |
+| Auditoría | `GET` | `/auditoria?entidad=USUARIO\|ROL&entidadId={id}&limit={n}` — historial de eventos (ver §6) |
 
 ### Azure Functions (`https://fn-usuarios-roles.azurewebsites.net/api`)
 
@@ -134,7 +152,128 @@ curl -X POST "$FUNCTIONS_URL/api/graphql/roles?code=$FUNCTION_KEY" \
   -d '{"query":"{ roles { id nombre usuarios { username } } }"}'
 ```
 
-## 6. Buenas prácticas implementadas
+## 6. Arquitectura orientada a eventos (Azure Event Grid)
+
+**Qué parte del requerimiento resuelve**: el CRUD sigue siendo síncrono
+(REST), pero dos necesidades que no deben bloquear ni acoplarse al
+request HTTP se resuelven con eventos:
+
+1. **Auditoría**: un historial de cada cambio sobre usuarios, roles y sus
+   asignaciones (quién cambió, qué y cuándo, con el `correlationId` del
+   request de origen), consultable vía `GET /auditoria` en el BFF.
+2. **Cascada al eliminar un usuario**: al eliminar un usuario (borrado
+   lógico), sus asignaciones en `USUARIO_ROL` se quitan de forma
+   asíncrona. Así un rol no queda bloqueado para siempre (`409`) por estar
+   asignado a un usuario que ya no existe.
+
+### Componentes
+
+| Componente | Tipo | Rol en el flujo |
+|---|---|---|
+| `CrearUsuario`, `ActualizarUsuario`, `EliminarUsuario`, `AsignarRolAUsuario`, `QuitarRolDeUsuario`, `CrearRol`, `ActualizarRol`, `EliminarRol` | Functions HTTP (Java) | **Generadoras**: después de escribir en Oracle publican su evento al topic (`UsuarioService` / `RolService` → `EventGridEventPublisher`). |
+| `egt-usuarios-roles` | Event Grid Topic (Event Grid Schema, East US) | Recibe los eventos y los enruta a cada suscripción. |
+| `sub-auditoria` | Event Subscription → Azure Function | Todos los tipos de evento → `AuditarEvento`. |
+| `sub-cascada-usuario-eliminado` | Event Subscription → Azure Function | Filtro `Usuarios.UsuarioEliminado` → `QuitarRolesDeUsuarioEliminado`. |
+| `AuditarEvento` | Function `@EventGridTrigger` (Java) | **Consumidora**: inserta el evento en `AUDITORIA_EVENTOS`. |
+| `QuitarRolesDeUsuarioEliminado` | Function `@EventGridTrigger` (Java) | **Consumidora**: borra las filas de `USUARIO_ROL` del usuario eliminado. |
+| `ListarAuditoria` + BFF `GET /auditoria` | Function HTTP + endpoint BFF | Cierra el ciclo: expone la auditoría al consumidor de la API. |
+| `eventgrid-deadletter` | Blob container | Eventos que agotan los reintentos (10 intentos / 24 h) quedan aquí para revisión. |
+
+### Diagrama de componentes
+
+```mermaid
+flowchart LR
+    P[Postman] -->|REST| BFF["BFF · Spring Boot\n(Docker en EC2)"]
+    BFF -->|"x-functions-key\nX-Correlation-Id"| CRUD
+
+    subgraph FA["Function App fn-usuarios-roles (Azure, Consumption)"]
+        CRUD["Functions CRUD\n(generadoras)"]
+        AUD["AuditarEvento\n@EventGridTrigger"]
+        CAS["QuitarRolesDeUsuarioEliminado\n@EventGridTrigger"]
+        LA["ListarAuditoria\n@HttpTrigger"]
+    end
+
+    CRUD -->|"1. escribe (JDBC)"| DB[("Oracle ADB\nUSUARIOS · ROLES · USUARIO_ROL\nAUDITORIA_EVENTOS")]
+    CRUD -->|"2. publica EventGridEvent\n(SAS key)"| T{{"Event Grid Topic\negt-usuarios-roles"}}
+    T -->|"sub-auditoria\n(todos los tipos)"| AUD
+    T -->|"sub-cascada-usuario-eliminado\n(Usuarios.UsuarioEliminado)"| CAS
+    T -.->|"reintentos agotados"| DL[("Blob\neventgrid-deadletter")]
+    AUD -->|INSERT| DB
+    CAS -->|DELETE USUARIO_ROL| DB
+    BFF -->|GET /api/auditoria| LA
+    LA -->|SELECT| DB
+```
+
+### Diagrama de secuencia: eliminar un usuario
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant P as Postman
+    participant B as BFF (EC2)
+    participant F as EliminarUsuario
+    participant DB as Oracle
+    participant T as Event Grid Topic
+    participant A as AuditarEvento
+    participant C as QuitarRolesDeUsuarioEliminado
+
+    P->>B: DELETE /usuarios/42
+    B->>F: DELETE /api/usuarios/42 (X-Correlation-Id)
+    F->>DB: UPDATE USUARIOS SET ESTADO='INACTIVO'
+    F->>T: publica Usuarios.UsuarioEliminado
+    F-->>B: 204
+    B-->>P: 204 (X-Correlation-Id)
+    par entrega asíncrona (push)
+        T->>A: evento
+        A->>DB: INSERT AUDITORIA_EVENTOS
+    and
+        T->>C: evento (filtro por tipo)
+        C->>DB: DELETE USUARIO_ROL WHERE USUARIO_ID=42
+    end
+    P->>B: GET /auditoria?entidad=USUARIO&entidadId=42
+    B-->>P: historial con el mismo correlationId
+```
+
+### Catálogo de eventos
+
+Event Grid Schema, `dataVersion` `1.0`. El `data` siempre tiene la forma
+`{ entidad, entidadId, correlationId, payload }`.
+
+| `eventType` | `subject` | `payload` |
+|---|---|---|
+| `Usuarios.UsuarioCreado` / `Usuarios.UsuarioActualizado` | `/usuarios/{id}` | `UsuarioDto` resultante |
+| `Usuarios.UsuarioEliminado` | `/usuarios/{id}` | `{ id }` |
+| `Usuarios.RolAsignado` / `Usuarios.RolQuitado` | `/usuarios/{id}/roles/{rolId}` | `{ usuarioId, rolId }` |
+| `Roles.RolCreado` / `Roles.RolActualizado` | `/roles/{id}` | `RolDto` resultante |
+| `Roles.RolEliminado` | `/roles/{id}` | `{ id }` |
+
+### Decisiones de diseño
+
+- **Por qué Event Grid** (y no Service Bus o Event Hubs): son eventos
+  discretos de "algo pasó", con pocos consumidores y bajo volumen. Event
+  Grid los entrega por **push** directo a Functions, sin polling, con
+  **filtros por tipo** en la suscripción y reintentos y dead-letter
+  nativos, y se paga por operación, igual que el plan Consumption. Service
+  Bus conviene para comandos con orden o sesiones, y Event Hubs para
+  streaming de alto volumen. Ninguno de los dos es el caso aquí.
+- **Publicación best-effort post-commit**: el evento se publica después de
+  que la escritura en Oracle ya se confirmó. Si Event Grid falla, se loguea
+  y la operación responde igual, porque el dato es la fuente de verdad. El
+  trade-off aceptado es que ese evento no queda auditado. Un *transactional
+  outbox* lo resolvería y queda como mejora futura.
+- **Consumidoras idempotentes**: Event Grid entrega al menos una vez
+  (at-least-once). `AuditarEvento` usa el `id` del evento como PK, así que
+  una reentrega no duplica la fila. `QuitarRolesDeUsuarioEliminado` repetida
+  borra 0 filas, y solo actúa si el usuario ya está `INACTIVO`.
+- **Consistencia eventual**: la cascada ocurre segundos después del
+  `DELETE`, no dentro del mismo request. Un `DELETE /roles/{id}` hecho
+  inmediatamente después puede seguir dando `409` hasta que llegue el
+  evento.
+- **Secretos**: el endpoint y la key del topic van en los App Settings del
+  Function App (`EVENTGRID_TOPIC_ENDPOINT` / `EVENTGRID_TOPIC_KEY`), nunca
+  en el código.
+
+## 7. Buenas prácticas implementadas
 
 - **Capas separadas por dominio**, no por capa global: `usuarios/` y
   `roles/` con su propio `controller/service/client` (BFF) o
@@ -186,7 +325,7 @@ curl -X POST "$FUNCTIONS_URL/api/graphql/roles?code=$FUNCTION_KEY" \
   `.env` (BFF) están gitignorados; `.env.example` documenta qué
   variables se necesitan sin exponer valores reales.
 
-## 7. Observabilidad
+## 8. Observabilidad
 
 - **Application Insights** queda asociado automáticamente a la Function
   App al desplegar (`host.json` con `applicationInsights.samplingSettings`
@@ -199,15 +338,23 @@ curl -X POST "$FUNCTIONS_URL/api/graphql/roles?code=$FUNCTION_KEY" \
 - El BFF propaga el `correlation-id` en sus logs (`logging.pattern.level`
   en `application.yml`), para poder rastrear un request de punta a
   punta cuando haya más integraciones.
+- **Flujo de eventos**: las métricas del Event Grid Topic (*Published*,
+  *Matched*, *Delivered*, *Dead Lettered*) muestran cuántos eventos
+  publicaron las generadoras y cuántos llegaron a cada suscripción. Las
+  consumidoras loguean `eventId` + `correlationId` en Application Insights,
+  y el mismo `correlationId` queda en `AUDITORIA_EVENTOS`. Con eso se sigue
+  un request desde el BFF hasta la última consumidora.
 
-## 8. Cómo probar
+## 9. Cómo probar
 
 **Local (BFF + Functions corriendo en la máquina):**
 
 ```bash
 # Azure Functions
+npx azurite --silent &          # storage local: lo exigen los triggers de Event Grid
 cd azure-functions
 mvn clean package
+cd target/azure-functions/fn-usuarios-roles   # el host corre desde el staging que genera Maven
 func start                      # http://localhost:7071
 
 # BFF, en otra terminal
@@ -217,18 +364,33 @@ java -jar target/bff-0.1.0-SNAPSHOT.jar --spring.profiles.active=dev
                                  # http://localhost:8080
 ```
 
+**Eventos en local**: sin `EVENTGRID_TOPIC_ENDPOINT`/`EVENTGRID_TOPIC_KEY`
+en `local.settings.json`, las Functions CRUD funcionan igual y solo
+loguean el evento que habrían publicado. Las consumidoras se prueban
+simulando la entrega de Event Grid con el webhook local del runtime (carpeta
+`Event Grid (solo local)` de Postman):
+
+```bash
+curl -X POST "http://localhost:7071/runtime/webhooks/EventGrid?functionName=AuditarEvento" \
+  -H "Content-Type: application/json" -H "aeg-event-type: Notification" \
+  -d '{"id":"test-1","subject":"/usuarios/1","eventType":"Usuarios.UsuarioEliminado",
+       "eventTime":"2026-10-04T12:00:00Z","dataVersion":"1.0",
+       "data":{"entidad":"USUARIO","entidadId":1,"correlationId":"local","payload":{"id":1}}}'
+```
+
 **Contra Azure ya desplegado**: correr el BFF con `--spring.profiles.active=prod`
 y las variables de [`bff/.env.example`](bff/.env.example) completas (`AZURE_FUNCTIONS_BASE_URL`,
 `AZURE_FUNCTIONS_KEY`) apuntando a `https://fn-usuarios-roles.azurewebsites.net`.
 
 **Postman**: importar [`postman/usuarios-roles.postman_collection.json`](postman/usuarios-roles.postman_collection.json)
-(25 requests, carpetas `BFF` y `Azure Functions`, ambas con CRUD completo
-de usuarios/roles + asignar/quitar rol). Las variables de colección
-(`bffUrl`, `functionsUrl`, `functionKey`, `usuarioId`, `rolId`) se
+(carpetas `BFF` y `Azure Functions`, ambas con CRUD completo de
+usuarios/roles + asignar/quitar rol + auditoría, más GraphQL y la
+simulación local de Event Grid). Las variables de colección
+(`bffUrl`, `functionsUrl`, `functionsHost`, `functionKey`, `usuarioId`, `rolId`) se
 completan según el ambiente a probar — el archivo no trae ningún secreto
 cargado por diseño.
 
-## 9. Despliegue actual
+## 10. Despliegue actual
 
 - **Azure Functions**: desplegado y verificado funcionando end-to-end
   contra Oracle — Function App `fn-usuarios-roles`, resource group
@@ -236,9 +398,20 @@ cargado por diseño.
 - **BFF**: dockerizado (`bff/Dockerfile`, build multi-stage, usuario no
   root) y verificado funcionando localmente contra la Function App real;
   **el despliegue en la instancia EC2 queda como siguiente paso** (ver
-  sección 10).
+  sección 11).
+- **Event Grid** (Exp3), en este orden:
+  1. Aplicar [`azure-functions/sql/auditoria_eventos.sql`](azure-functions/sql/auditoria_eventos.sql) en Oracle.
+  2. Desplegar las Functions (`mvn clean package azure-functions:deploy`),
+     que ya incluyen las consumidoras `AuditarEvento` y
+     `QuitarRolesDeUsuarioEliminado`.
+  3. Ejecutar [`infra/eventgrid/setup-eventgrid.sh`](infra/eventgrid/setup-eventgrid.sh)
+     (requiere `az login`). Registra el provider `Microsoft.EventGrid`, crea
+     el topic `egt-usuarios-roles`, escribe su endpoint y key en los App
+     Settings del Function App, crea el container de dead-letter y las dos
+     suscripciones. Es idempotente y no imprime la key.
+  4. Redesplegar el BFF en EC2 para exponer `GET /auditoria`.
 
-## 10. Estado actual y próximos pasos
+## 11. Estado actual y próximos pasos
 
 Transparencia sobre lo que falta cerrar:
 
@@ -252,7 +425,12 @@ Transparencia sobre lo que falta cerrar:
       evaluadas: Function App Premium + VNET/NAT Gateway, u Oracle Private
       Endpoint.
 - [ ] **Herramienta de migraciones** (Flyway/Liquibase) — hoy `schema.sql`
-      se aplica manualmente.
+      y `auditoria_eventos.sql` se aplican manualmente.
+- [ ] **Desplegar la arquitectura de eventos en Azure** (pasos en la
+      sección 10) y verificarla de punta a punta: métricas del topic,
+      invocaciones de las consumidoras y `GET /auditoria` vía BFF.
+- [ ] **Outbox transaccional** para no perder eventos si Event Grid no
+      está disponible al momento de publicar (hoy es best-effort, ver §6).
 
 ## Créditos
 

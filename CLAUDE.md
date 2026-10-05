@@ -39,6 +39,9 @@ targets de despliegue distintos (EC2 vs Azure).
 
 ```
 Frontend  →  BFF (Spring Boot, EC2/Docker)  →  Azure Functions  →  Oracle DB
+                                                   │ eventos de dominio
+                                                   ▼
+                                    Azure Event Grid  →  Functions consumidoras
 ```
 
 ### Arquitectura interna del BFF
@@ -108,7 +111,7 @@ estructura escale sin reescribirse.
   poder trazar un request a través de todo el flujo cuando haya varias
   integraciones en juego.
 - **Health checks por dependencia**: implementado — un `HealthIndicator`
-  por Function (`usuariosFunction`, `rolesFunction` en
+  por Function (`usuariosFunction`, `rolesFunction`, `auditoriaFunction` en
   `HealthIndicatorsConfig`), visibles en `/actuator/health` con
   `show-details`, en vez de solo el health genérico de la app.
 - **Cache opcional vía abstracción de Spring (`@Cacheable`)**: si el
@@ -161,6 +164,12 @@ Esta sección describe la integración **desde el punto de vista del BFF**
   red del BFF.
 - Registrar aquí cada Function consumida, su contrato (request/response) y
   su propósito a medida que se integren.
+- Functions consumidas hoy: CRUD de `usuarios` y `roles` (ver
+  `docs/gestion-usuarios-roles.md` §6) y `ListarAuditoria`
+  (`GET /api/auditoria?entidad=USUARIO|ROL&entidadId=&limit=`, default 50,
+  máx. 200), expuesta como `GET /auditoria` en el dominio `auditoria` del BFF.
+  El BFF **no** publica ni consume eventos: Event Grid vive entero del lado
+  de las Functions (ver "Arquitectura orientada a eventos").
 
 ## Azure Functions
 
@@ -221,6 +230,52 @@ cannot be cast to [C`) aunque el valor real sea un `String`. Se soluciona
 declarando el tipo explícito primero: `String raw = env.getArgument("id");`
 y recién ahí operar sobre `raw` (ver `UsuarioGraphQLSchema`/
 `RolGraphQLSchema`).
+
+### Arquitectura orientada a eventos (Azure Event Grid)
+
+Agregada en la Exp3. Resuelve dos necesidades que no deben acoplarse al
+request HTTP del CRUD: **auditoría** de cambios y **cascada** al eliminar
+un usuario (quitar sus roles). Todo vive en el mismo Function App
+`fn-usuarios-roles`.
+
+- **Generadoras**: `UsuarioService` y `RolService` publican un evento de
+  dominio después de cada escritura exitosa, vía
+  `common/eventos/EventGridEventPublisher`. El cliente del SDK
+  (`azure-messaging-eventgrid`) es un singleton estático, con el mismo
+  patrón que `DataSourceProvider`. Tipos de evento en `TiposEvento`
+  (`Usuarios.*`, `Roles.*`); el `data` siempre es
+  `{entidad, entidadId, correlationId, payload}`.
+- **Publicación best-effort post-commit**: si Event Grid falla, se loguea
+  en WARN y la respuesta HTTP no cambia. Decisión aceptada; un outbox
+  transaccional queda como mejora futura.
+- **Correlation-id**: las Functions CRUD leen `X-Correlation-Id` con
+  `HttpRequestUtil.correlationId` (case-insensitive; genera UUID si falta)
+  y lo meten en el `data` del evento.
+- **Consumidoras** (`@EventGridTrigger`, parseo común con
+  `common/eventos/EventoRecibido`):
+  - `AuditarEvento` (`auditoria/AuditoriaEventosFunction`): todos los
+    tipos → `AUDITORIA_EVENTOS` (`sql/auditoria_eventos.sql`). Idempotente
+    por PK `EVENT_ID`.
+  - `QuitarRolesDeUsuarioEliminado` (`usuarios/UsuarioEventosFunction`):
+    solo `Usuarios.UsuarioEliminado` → borra `USUARIO_ROL` del usuario si
+    está `INACTIVO`. Idempotente.
+  - Una excepción en una consumidora hace fallar la invocación a propósito,
+    para que Event Grid reintente y, al agotar los intentos, mande el
+    evento a dead-letter.
+- **Infra** (`infra/eventgrid/setup-eventgrid.sh`, az CLI, idempotente):
+  topic `egt-usuarios-roles` (Event Grid Schema, `eastus`), suscripciones
+  `sub-auditoria` (sin filtro) y `sub-cascada-usuario-eliminado` (filtro
+  por tipo), 10 intentos, TTL 24 h y dead-letter en el container
+  `eventgrid-deadletter` del storage del Function App.
+- **Secretos**: `EVENTGRID_TOPIC_ENDPOINT` / `EVENTGRID_TOPIC_KEY` los
+  escribe el script directo en los App Settings. **No** van en el
+  `pom.xml`: el deploy del plugin no borra settings que no declara, y así
+  quien despliega no necesita tener la key en su shell. Sin estas
+  variables (dev local), el publisher solo loguea los eventos.
+- **Probar consumidoras en local**: `POST
+  http://localhost:7071/runtime/webhooks/EventGrid?functionName=<Nombre>`
+  con header `aeg-event-type: Notification` y un evento en Event Grid
+  Schema como body.
 
 ### Estructura interna
 
@@ -336,6 +391,8 @@ azure-functions/src/main/java/com/empresa/functions
 - [ ] JDBC directo vs. micro-ORM para el acceso a Oracle desde las
       Functions.
 - [ ] Un Function App único vs. uno por dominio.
+- [ ] Outbox transaccional para la publicación de eventos (hoy
+      best-effort post-commit).
 - [ ] **Endurecer el acceso de red a Oracle** — hoy la ACL de la ADB está
       abierta (`0.0.0.0/0`) porque el plan Consumption no da un set chico
       de IPs de salida confiable. Evaluar Premium+VNET o Private Endpoint

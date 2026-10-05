@@ -56,6 +56,15 @@
       <version>24.1</version>
     </dependency>
 
+    <!-- Publicación de eventos de dominio hacia el Event Grid Topic. Las
+         funciones consumidoras (@EventGridTrigger) no lo necesitan: el
+         trigger ya viene en azure-functions-java-library. -->
+    <dependency>
+      <groupId>com.azure</groupId>
+      <artifactId>azure-messaging-eventgrid</artifactId>
+      <version>4.31.8</version>
+    </dependency>
+
     <dependency>
       <groupId>jakarta.validation</groupId>
       <artifactId>jakarta.validation-api</artifactId>

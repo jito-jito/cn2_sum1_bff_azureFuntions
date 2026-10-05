@@ -23,4 +23,10 @@ public class HealthIndicatorsConfig {
     public HealthIndicator rolesFunctionHealthIndicator(RestClient azureFunctionsRestClient) {
         return new AzureFunctionHealthIndicator(azureFunctionsRestClient, "/api/roles");
     }
+
+    @Bean
+    public HealthIndicator auditoriaFunctionHealthIndicator(RestClient azureFunctionsRestClient) {
+        // limit=1: basta con saber que la Function y su tabla responden.
+        return new AzureFunctionHealthIndicator(azureFunctionsRestClient, "/api/auditoria?limit=1");
+    }
 }

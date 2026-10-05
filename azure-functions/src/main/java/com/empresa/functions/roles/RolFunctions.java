@@ -1,5 +1,6 @@
 package com.empresa.functions.roles;
 
+import com.empresa.functions.common.HttpRequestUtil;
 import com.empresa.functions.common.HttpResponseUtil;
 import com.empresa.functions.common.JsonUtil;
 import com.empresa.functions.common.exception.ConflictException;
@@ -30,7 +31,8 @@ public class RolFunctions {
             ExecutionContext context) {
         return handle(request, context, () -> {
             CrearRolRequest body = JsonUtil.mapper().readValue(request.getBody().orElse("{}"), CrearRolRequest.class);
-            return HttpResponseUtil.json(request, HttpStatus.CREATED, service.crear(body));
+            return HttpResponseUtil.json(request, HttpStatus.CREATED,
+                    service.crear(body, HttpRequestUtil.correlationId(request)));
         });
     }
 
@@ -60,7 +62,8 @@ public class RolFunctions {
         return handle(request, context, () -> {
             ActualizarRolRequest body = JsonUtil.mapper().readValue(request.getBody().orElse("{}"),
                     ActualizarRolRequest.class);
-            return HttpResponseUtil.json(request, HttpStatus.OK, service.actualizar(id, body));
+            return HttpResponseUtil.json(request, HttpStatus.OK,
+                    service.actualizar(id, body, HttpRequestUtil.correlationId(request)));
         });
     }
 
@@ -71,7 +74,7 @@ public class RolFunctions {
             @BindingName("id") long id,
             ExecutionContext context) {
         return handle(request, context, () -> {
-            service.eliminar(id);
+            service.eliminar(id, HttpRequestUtil.correlationId(request));
             return request.createResponseBuilder(HttpStatus.NO_CONTENT).build();
         });
     }

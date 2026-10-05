@@ -156,6 +156,26 @@ public class UsuarioRepository {
         }
     }
 
+    /**
+     * Cascada asíncrona de UsuarioEliminado: quita todas las asignaciones de
+     * rol del usuario, para que esos roles no queden bloqueados (409) por un
+     * usuario que ya no existe. Solo actúa si el usuario está INACTIVO, así un
+     * evento reentregado o fuera de orden no puede borrar roles de un usuario
+     * activo. Idempotente: repetirlo borra 0 filas.
+     */
+    public int quitarRolesDeUsuarioInactivo(Long usuarioId) {
+        String sql = "DELETE FROM USUARIO_ROL WHERE USUARIO_ID = ? "
+                + "AND EXISTS (SELECT 1 FROM USUARIOS WHERE ID = ? AND ESTADO = 'INACTIVO')";
+        try (Connection conn = DataSourceProvider.get().getConnection();
+                PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setLong(1, usuarioId);
+            ps.setLong(2, usuarioId);
+            return ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new RuntimeException("Error al quitar roles del usuario eliminado " + usuarioId, e);
+        }
+    }
+
     private void verificarActivo(String tabla, Long id, String etiqueta) {
         String sql = "SELECT 1 FROM " + tabla + " WHERE ID = ? AND ESTADO = 'ACTIVO'";
         try (Connection conn = DataSourceProvider.get().getConnection();
